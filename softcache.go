@@ -106,6 +106,8 @@ func (cm *CacheManager) GetData(funcName, context string) (string, error) {
 	// 	In order to avoid wasteful database query, we have to double check if the cache is not exists in redis.
 	// 	Reminder: the database query is MUCH more expensive than the redis GET operation
 	if s, err := cm.redisClient.Get(cacheId).Result(); err == nil && s != `` {
+		//when there is cache-hit in the second Redis-Get, the cache should be just prepared by another thread.
+		//thus no need to perform register
 		return s, nil
 	} else {
 		if err != redis.Nil {
@@ -129,7 +131,7 @@ func (cm *CacheManager) register(cacheId string, rsType ResultSetType) {
 	}
 
 	//get back the ttl from redis
-	//FIXME: test if the cacheId doesn't exists
+	//remarks: in rare case, d may be = -2 second as the cache has expired, but it will not break the code and thus no need to take care
 	d, err0 := cm.redisClient.TTL(cacheId).Result()
 	if err0 != nil {
 		panic(err0)
@@ -214,7 +216,7 @@ func (cm *CacheManager) cacheRebuilder() {
 
 		rsType := cm.resultSetTypes[funcName]
 		//get the TTL from redis. if the freshness is still within the SoftTtl, then do nothing
-		//FIXME: test if the cacheId doesn't exists
+		//remarks: in rare case, d may be = -2 second as the cache has expired, but it will not break the code and thus no need to take care
 		ttl, err0 := cm.redisClient.TTL(cacheId).Result()
 		if err0 != nil {
 			panic(err0)
