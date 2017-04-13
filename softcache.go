@@ -45,14 +45,14 @@ type CacheManager struct {
 	redisClient *redis.Client
 }
 
-func New(lockNamePrefix, zsetLockName, zsetName string, rsMap map[string]ResultSetType, lockManager *simplelock.LockManager, redisConn *redis.Client) *CacheManager {
+func New(lockNamePrefix, zsetLockName, zsetName string, lockManager *simplelock.LockManager, redisConn *redis.Client) *CacheManager {
 	cm := &CacheManager{
 		lockNamePrefix:    lockNamePrefix,
 		zsetLockName:      zsetLockName,
 		zsetName:          zsetName,
 		taskChannel:       make(chan string),
 		recentRegistation: cache.New(lockDuration, lockDuration),
-		resultSetTypes:    rsMap,
+		resultSetTypes:    map[string]ResultSetType{},
 		lockManger:        simplelock.New(redisConn),
 		redisClient:       redisConn,
 	}
@@ -61,6 +61,14 @@ func New(lockNamePrefix, zsetLockName, zsetName string, rsMap map[string]ResultS
 	go cm.taskPicker()
 
 	return cm
+}
+
+func (cm *CacheManager) AddResultSetType(funcName string, rsType ResultSetType) error {
+	if _, ok := cm.resultSetTypes[funcName]; ok {
+		errors.New(`funcName has already existed.`)
+	}
+	cm.resultSetTypes[funcName] = rsType
+	return nil
 }
 
 func getCacheId(funcName, context string) string {
