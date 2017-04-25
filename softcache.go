@@ -80,6 +80,36 @@ func getFuncNameAndContext(cacheId string) (funcName string, context string) {
 	return temp[0], temp[1]
 }
 
+func (cm *CacheManager) Refresh(funcName, context string) error {
+	rsType, ok := cm.resultSetTypes[funcName]
+	if !ok {
+		//not registered function, simply return and do nothing
+		return errors.New(`funcName is not registered.`)
+	}
+
+	cacheId := getCacheId(funcName, context)
+	//step 1: shorten the cache TTL
+	//otherwise the cache rebuilder may consider the cache is still fresh and refuse to rebuild it
+	if ttl := rsType.HardTtl - rsType.SoftTtl - 10*time.Second; ttl > 0 {
+		// elapsedTime > rs.SoftTtl
+		// elapsedTime + ttl = rs.HardTtl
+		// i.e. ttl < rs.HardTtl - rs.SoftTtl
+		if err := cm.redisClient.Expire(cacheId, ttl).Err(); err != nil {
+			return err
+		}
+	}
+
+	//step 2: get a lock, to protect the ZSet
+	//no matter if the lock can be acquired, perform update.
+	//as the race condition doesn't make disastrous result
+	if isSuccessful, lockToken := cm.lockManger.GetLock(cm.zsetLockName, lockDuration, lockDuration); isSuccessful {
+		defer cm.lockManger.ReleaseLock(cm.zsetLockName, lockToken)
+	}
+
+	//step 3: add the cacheId into redis
+	return cm.redisClient.ZAdd(cm.zsetName, redis.Z{Score: float64(time.Now().Unix()), Member: cacheId}).Err()
+}
+
 func (cm *CacheManager) GetData(funcName, context string) (string, error) {
 	rsType, ok := cm.resultSetTypes[funcName]
 	if !ok {
