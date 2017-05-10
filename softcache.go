@@ -80,7 +80,8 @@ func getFuncNameAndContext(cacheId string) (funcName string, context string) {
 	return temp[0], temp[1]
 }
 
-func (cm *CacheManager) Refresh(funcName, context string) error {
+//if isHardRefresh is true, then the cache will be immediately deleted from the cache system
+func (cm *CacheManager) Refresh(funcName, context string, isHardRefresh bool) error {
 	rsType, ok := cm.resultSetTypes[funcName]
 	if !ok {
 		//not registered function, simply return and do nothing
@@ -88,17 +89,24 @@ func (cm *CacheManager) Refresh(funcName, context string) error {
 	}
 
 	cacheId := getCacheId(funcName, context)
-	//step 1: shorten the cache TTL
-	//otherwise the cache rebuilder may consider the cache is still fresh and refuse to rebuild it
-	if ttl := rsType.HardTtl - rsType.SoftTtl - 10*time.Second; ttl > 0 {
-		// elapsedTime > rs.SoftTtl
-		// elapsedTime + ttl = rs.HardTtl
-		// i.e. ttl < rs.HardTtl - rs.SoftTtl
-		if err := cm.redisClient.Expire(cacheId, ttl).Err(); err != nil {
+	if isHardRefresh {
+		//step 1a: delete the cache directly
+		if err := cm.redisClient.Del(cacheId).Err(); err != nil {
 			return err
 		}
-	}
+	} else {
 
+		//step 1b: shorten the cache TTL
+		//otherwise the cache rebuilder may consider the cache is still fresh and refuse to rebuild it
+		if ttl := rsType.HardTtl - rsType.SoftTtl - 10*time.Second; ttl > 0 {
+			// elapsedTime > rs.SoftTtl
+			// elapsedTime + ttl = rs.HardTtl
+			// i.e. ttl < rs.HardTtl - rs.SoftTtl
+			if err := cm.redisClient.Expire(cacheId, ttl).Err(); err != nil {
+				return err
+			}
+		}
+	}
 	//step 2: get a lock, to protect the ZSet
 	//no matter if the lock can be acquired, perform update.
 	//as the race condition doesn't make disastrous result
