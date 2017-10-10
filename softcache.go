@@ -260,7 +260,15 @@ func (cm *CacheManager) cacheRebuilder() {
 		cacheId := <-cm.taskChannel
 		funcName, context := getFuncNameAndContext(cacheId)
 
-		rsType := cm.resultSetTypes[funcName]
+		rsType, ok := cm.resultSetTypes[funcName]
+		if !ok {
+			//	there is a cacheId we don't understand, there is two condition:
+			//		1.	the current running manager is the old version, the cacheId comes from some new version worker
+			//		2.	the cacheId is already deplicated
+			//	In above both case, simply ignore the cacheId is okay
+			continue
+		}
+
 		//get the TTL from redis. if the freshness is still within the SoftTtl, then do nothing
 		//remarks: in rare case, d may be = -2 second as the cache has expired, but it will not break the code and thus no need to take care
 		ttl, err0 := cm.redisClient.TTL(cacheId).Result()
